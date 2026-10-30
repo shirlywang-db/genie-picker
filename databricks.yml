@@ -1,0 +1,30 @@
+bundle:
+  name: genie-picker
+
+variables:
+  app_name:
+    description: Name of the Databricks App (lowercase letters, numbers and hyphens).
+    default: genie-picker
+  genie_workspaces:
+    description: >-
+      Workspaces to discover Genie agents in, separated by commas or semicolons (use semicolons with --var), each optionally "Label=<workspace URL>",
+      e.g. "Sales=https://adb-111.11.azuredatabricks.net, Finance=https://adb-222.2.azuredatabricks.net".
+      "current" means the workspace the app is deployed in (the default). The app's service principal must be set up
+      in every listed workspace (see README).
+    default: current
+
+resources:
+  apps:
+    genie_picker:
+      name: ${var.app_name}
+      description: Pick a Genie agent you have access to and chat with it in the native Genie UI
+      source_code_path: ./src
+      config:
+        command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+        env:
+          - name: GENIE_WORKSPACES
+            value: ${var.genie_workspaces}
+
+targets:
+  default:
+    default: true

@@ -13,9 +13,12 @@ allowed to use, across several workspaces. Users pick an agent from a dropdown, 
 
 ## Install
 
+The repo is a [Databricks Asset Bundle](https://docs.databricks.com/aws/en/dev-tools/bundles/):
+`databricks.yml` defines the app, and the app code is in `src/`.
+
 ### Prerequisites
 
-- **Databricks CLI** v0.229 or later, signed in to the workspace that will host the app:
+- A recent **Databricks CLI** (tested with v1.18.0), signed in to the workspace that will host the app:
   `databricks auth login --host <workspace URL> --profile <profile>`
 - Permission to create Databricks Apps in that workspace.
 - **Workspace admin** in every workspace whose agents should appear, for the one-time setup in step 4.
@@ -29,43 +32,47 @@ cd genie-picker
 
 ### 2. Choose the workspaces
 
-Edit `GENIE_WORKSPACES` in `app.yaml`:
+Set the `genie_workspaces` variable in `databricks.yml`:
 
 ```yaml
-  - name: GENIE_WORKSPACES
-    value: "Sales=https://adb-1111111111111111.11.azuredatabricks.net, Finance=https://adb-2222222222222222.2.azuredatabricks.net"
+  genie_workspaces:
+    default: "Hub=current, Sales=https://adb-1111111111111111.11.azuredatabricks.net, Finance=https://adb-2222222222222222.2.azuredatabricks.net"
 ```
 
-- Comma separated, each entry optionally `Label=<workspace URL>`. The label is the dropdown group name;
-  without one, the first part of the hostname is used.
+- Entries are separated by commas or semicolons, each optionally `Label=<workspace URL>`. The label is
+  the dropdown group name; without one, the first part of the hostname is used.
+- `current` means the workspace the app is deployed in. The default, `current`, searches only that workspace.
 - `?o=…` and paths are ignored, so you can paste a workspace URL straight from the browser.
-- Only these workspaces are searched. **Include the hosting workspace** if its agents should appear too.
-- Leave it empty to search only the hosting workspace.
+- Only these workspaces are searched, never the rest of the account.
 
-### 3. Create and deploy the app
+You can also pass it at deploy time instead. The CLI splits `--var` values on commas, so use semicolons there:
+`--var="genie_workspaces=Hub=current; Sales=https://adb-111.11.azuredatabricks.net"`.
+
+To use a different app name, set the `app_name` variable (default `genie-picker`). The commands below
+assume the default.
+
+### 3. Deploy and start the app
 
 ```bash
-PROFILE=<profile>                      # CLI profile for the hosting workspace
-APP_DIR=/Workspace/Users/<your user name>/genie-picker
-
-databricks apps create genie-picker -p $PROFILE
-databricks sync . $APP_DIR -p $PROFILE
-databricks apps deploy genie-picker --source-code-path $APP_DIR -p $PROFILE
+databricks bundle deploy -p <profile>
+databricks bundle run genie_picker -p <profile>
 ```
 
-The app doesn't need user authorization (on-behalf-of-user) scopes; leave them unset.
+`bundle deploy` uploads the code and creates the app. `bundle run` deploys the code to the app and
+starts it, then prints the app URL. The app doesn't use user authorization (on-behalf-of-user)
+scopes.
 
-To change the workspace list later, edit `app.yaml` and re-run the `sync` and `deploy` commands.
+To change the workspace list later, update `genie_workspaces` and run both commands again.
 
 ### 4. Set up the app's service principal in each listed workspace
 
 Databricks creates a service principal for the app. Find its application ID:
 
 ```bash
-databricks apps get genie-picker -p $PROFILE -o json | jq -r .service_principal_client_id
+databricks apps get genie-picker -p <profile> -o json | jq -r .service_principal_client_id
 ```
 
-In **every workspace listed in `GENIE_WORKSPACES`** (including the hosting workspace, if listed),
+In **every workspace listed in `genie_workspaces`** (including the hosting workspace, if listed),
 a workspace admin:
 
 1. **Adds the service principal to the workspace** (not needed in the hosting workspace):
@@ -90,7 +97,7 @@ agent's underlying data. These are the same permissions they need to use Genie d
 
 ### 6. Open the app
 
-Open the app URL (`databricks apps get genie-picker -p $PROFILE`) and share it with your users
+Open the app URL printed by `bundle run` and share it with your users
 (*Compute → Apps → genie-picker → Permissions*, **Can use**).
 
 ---
@@ -107,7 +114,7 @@ Browser ──► genie-picker app (FastAPI)            builds the dropdown
 
 | Step | Identity used | Notes |
 |---|---|---|
-| Build the dropdown (every workspace in `GENIE_WORKSPACES`) | The **app's service principal**, plus the user's **email** | The service principal checks each agent's permissions against the user. The app holds no user token |
+| Build the dropdown (every workspace in `genie_workspaces`) | The **app's service principal**, plus the user's **email** | The service principal checks each agent's permissions against the user. The app holds no user token |
 | Chat with an agent | The **user**, signed in to the agent's workspace | Loaded directly by the browser; queries run with the user's own data permissions |
 
 The app does **not** use on-behalf-of-user (OBO) authorization.
@@ -148,7 +155,7 @@ consistent filtering method and the app never holds a user token.
 
 ### What it does (read-only)
 
-For each workspace listed in `GENIE_WORKSPACES`:
+For each workspace listed in `genie_workspaces`:
 
 1. Signs in to that workspace (`POST /oidc/v1/token`, client credentials).
 2. Looks up the user and their groups (`GET /api/2.0/preview/scim/v2/Users?filter=userName eq …`).
@@ -193,7 +200,8 @@ Notes:
 | The iframe asks the user to log in | Expected the first time per workspace per session. Use **Open in new tab ↗** if the sign-in pop-up doesn't return to the app |
 | The iframe is blank or refuses to load | That workspace doesn't allow embedding from the app's domain (step 4.3) |
 
-Logs: `databricks apps logs genie-picker -p $PROFILE`, or `<app URL>/logz`.
+Logs: `databricks apps logs genie-picker -p <profile>`, or `<app URL>/logz`. At startup the app logs
+the workspaces it will search (`Searching Genie agents in: …`).
 
 ---
 
@@ -218,16 +226,3 @@ memberships only.
 The embedded agent uses the user's Databricks session for its workspace. Browsers with strict
 third-party-cookie settings can interfere with signing in inside an iframe. Test with your
 organization's standard browser; **Open in new tab ↗** is the fallback.
-
----
-
-## Local development
-
-```bash
-uv venv && uv pip install fastapi uvicorn httpx databricks-sdk
-DATABRICKS_PROFILE=<profile> .venv/bin/uvicorn app:app --reload --port 8765
-```
-
-Without service principal credentials (`DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET`), your
-CLI profile stands in for the service principal in that profile's workspace. Other workspaces show
-as unavailable.

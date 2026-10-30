@@ -49,17 +49,22 @@ def workspace_host() -> str:
 def configured_workspaces() -> list[tuple[str, str]]:
     """(label, host) pairs from GENIE_WORKSPACES, e.g. "Sales=https://adb-1.azuredatabricks.net, https://adb-2...".
 
-    Entries are comma or newline separated; the "Label=" prefix is optional. Defaults to
-    the app's own workspace.
+    Entries are separated by commas, semicolons or newlines (semicolons survive
+    `databricks bundle deploy --var`, which splits on commas); the "Label=" prefix is
+    optional. "current" stands for the app's own workspace, which is also the default.
     """
-    raw = os.environ.get("GENIE_WORKSPACES", "").replace("\n", ",")
+    raw = os.environ.get("GENIE_WORKSPACES", "").replace("\n", ",").replace(";", ",")
+
+    def host_of(value: str) -> str:
+        return workspace_host() if value.strip().lower() == "current" else normalize_host(value)
+
     entries = []
     for item in filter(None, (i.strip() for i in raw.split(","))):
         label, sep, rest = item.partition("=")
         if sep and "://" not in label and "." not in label:
-            entries.append((label.strip(), normalize_host(rest)))
+            entries.append((label.strip(), host_of(rest)))
         else:
-            entries.append(("", normalize_host(item)))
+            entries.append(("", host_of(item)))
     if not entries:
         entries = [("", workspace_host())]
     return [(label or urlparse(host).netloc.split(".")[0], host) for label, host in entries]
@@ -153,6 +158,11 @@ async def spaces_for_user(client: httpx.AsyncClient, host: str, email: str) -> l
 
 
 app = FastAPI(title="Genie Picker")
+
+
+@app.on_event("startup")
+async def log_workspaces():
+    log.info("Searching Genie agents in: %s", ", ".join(f"{label} ({host})" for label, host in configured_workspaces()))
 
 
 @app.get("/api/spaces")

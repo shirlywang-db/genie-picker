@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Genie Agents</title>
+  <style>
+    :root { --ink: #1b3139; --muted: #5a6f77; --line: #dce0e2; --accent: #ff3621; --bg: #f9f7f4; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; height: 100%; font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
+    body { display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; gap: 16px; min-height: 76px; padding: 14px 20px; background: #fff; border-bottom: 1px solid var(--line); }
+    h1 { font-size: 17px; margin: 0; white-space: nowrap; }
+    h1 span { color: var(--accent); }
+    select { min-width: 320px; max-width: 520px; padding: 7px 10px; font: inherit; font-size: 14px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+    /* Wrap long descriptions over up to 3 lines; the full text is in the tooltip */
+    .desc { flex: 1; font-size: 13px; line-height: 1.45; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+    .right { display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+    .right a { color: var(--ink); }
+    .warn { color: #b45309; cursor: help; }
+    main { flex: 1; position: relative; }
+    iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+    .message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 40px; color: var(--muted); font-size: 15px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>&#9670;</span> Genie Agents</h1>
+    <select id="picker" aria-label="Select a Genie agent" disabled><option>Loading agents…</option></select>
+    <div class="desc" id="desc"></div>
+    <div class="right">
+      <span class="warn" id="warn" hidden></span>
+      <a id="open" href="#" target="_blank" rel="noopener" hidden>Open in new tab &#8599;</a>
+      <span id="user"></span>
+    </div>
+  </header>
+  <main>
+    <div class="message" id="message">Loading the Genie agents you have access to…</div>
+    <iframe id="genie" title="Genie agent" allow="clipboard-write" hidden></iframe>
+  </main>
+
+  <script>
+    const picker = document.getElementById("picker");
+    const frame = document.getElementById("genie");
+    const message = document.getElementById("message");
+    const desc = document.getElementById("desc");
+    const openLink = document.getElementById("open");
+    let agents = [];
+
+    function show(agent) {
+      if (!agent) return;
+      frame.src = agent.embed_url;
+      frame.hidden = false;
+      message.hidden = true;
+      desc.textContent = agent.description || "";
+      desc.title = agent.description || "";
+      openLink.href = agent.open_url;
+      openLink.hidden = false;
+      localStorage.setItem("genie-picker:last", agent.id);
+      const url = new URL(location);
+      url.searchParams.set("space", agent.id);
+      history.replaceState(null, "", url);
+    }
+
+    async function load() {
+      try {
+        const resp = await fetch("api/spaces");
+        if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
+        const data = await resp.json();
+        agents = data.agents;
+        if (data.user) document.getElementById("user").textContent = data.user;
+        if (data.unavailable.length) {
+          const warn = document.getElementById("warn");
+          warn.textContent = `⚠ ${data.unavailable.length} workspace${data.unavailable.length > 1 ? "s" : ""} unavailable`;
+          warn.title = data.unavailable.map(u => `${u.workspace}: ${u.error}`).join("\n");
+          warn.hidden = false;
+        }
+      } catch (err) {
+        picker.innerHTML = "<option>Unavailable</option>";
+        message.textContent = "Could not load Genie agents: " + err.message;
+        return;
+      }
+
+      if (!agents.length) {
+        picker.innerHTML = "<option>No agents available</option>";
+        message.textContent = "You don't have access to any Genie agents yet. Ask the agent owner to share one with you.";
+        return;
+      }
+
+      // Group by workspace so agents from other workspaces are clearly labelled
+      picker.innerHTML = "";
+      const groups = new Map();
+      agents.forEach((a, i) => {
+        if (!groups.has(a.workspace)) groups.set(a.workspace, []);
+        groups.get(a.workspace).push([a, i]);
+      });
+      for (const [workspace, items] of groups) {
+        const parent = groups.size > 1 ? picker.appendChild(Object.assign(document.createElement("optgroup"), { label: workspace })) : picker;
+        for (const [a, i] of items) parent.appendChild(new Option(a.title, i));
+      }
+      picker.disabled = false;
+
+      const wanted = new URLSearchParams(location.search).get("space") || localStorage.getItem("genie-picker:last");
+      const start = Math.max(0, agents.findIndex(a => a.id === wanted));
+      picker.value = start;
+      show(agents[start]);
+    }
+
+    picker.addEventListener("change", () => show(agents[picker.value]));
+    load();
+  </script>
+</body>
+</html>

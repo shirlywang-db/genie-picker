@@ -1,0 +1,15 @@
+command:
+  - "uvicorn"
+  - "app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  # Workspaces to discover Genie agents in: comma separated, each optionally "Label=<workspace URL>".
+  # Example: "Sales=https://adb-1111111111111111.11.azuredatabricks.net, Finance=https://adb-2222222222222222.2.azuredatabricks.net"
+  # Leave empty to use only the workspace the app is deployed in.
+  # The app's service principal must be set up in every listed workspace (see README).
+  - name: GENIE_WORKSPACES
+    value: ""
